@@ -127,32 +127,34 @@ func (fh *FallbackHandler) WrapHandler(handler gin.HandlerFunc) gin.HandlerFunc 
 		// Normalize model (handles Gemini thinking suffixes)
 		normalizedModel, _ := util.NormalizeGeminiThinkingModel(modelName)
 
-		// Check if we have providers for this model
-		providers := util.GetProviderName(normalizedModel)
-
 		// Track resolved model for logging (may change if mapping is applied)
 		resolvedModel := normalizedModel
 		usedMapping := false
+		var providers []string
+
+		// PRIORITY 1: Check model mappings FIRST (user-configured routing takes precedence)
+		// This allows users to override local providers with their preferred models
+		if fh.modelMapper != nil {
+			if mappedModel := fh.modelMapper.MapModel(normalizedModel); mappedModel != "" {
+				// Mapping found - rewrite the model in request body
+				bodyBytes = rewriteModelInRequest(bodyBytes, mappedModel)
+				c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				resolvedModel = mappedModel
+				usedMapping = true
+
+				// Get providers for the mapped model
+				providers = util.GetProviderName(mappedModel)
+
+				// Continue to handler with remapped model
+				goto handleRequest
+			}
+		}
+
+		// PRIORITY 2: Check if we have local providers for this model
+		providers = util.GetProviderName(normalizedModel)
 
 		if len(providers) == 0 {
-			// No providers configured - check if we have a model mapping
-			if fh.modelMapper != nil {
-				if mappedModel := fh.modelMapper.MapModel(normalizedModel); mappedModel != "" {
-					// Mapping found - rewrite the model in request body
-					bodyBytes = rewriteModelInRequest(bodyBytes, mappedModel)
-					c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-					resolvedModel = mappedModel
-					usedMapping = true
-
-					// Get providers for the mapped model
-					providers = util.GetProviderName(mappedModel)
-
-					// Continue to handler with remapped model
-					goto handleRequest
-				}
-			}
-
-			// No mapping found - check if we have a proxy for fallback
+			// No mapping and no local providers - check if we have a proxy for fallback
 			proxy := fh.getProxy()
 			if proxy != nil {
 				// Log: Forwarding to ampcode.com (uses Amp credits)
