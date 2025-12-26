@@ -367,7 +367,7 @@ func ConvertClaudeResponseToOpenAINonStream(_ context.Context, _ string, origina
 				outputTokens = usage.Get("output_tokens").Int()
 				// Estimate reasoning tokens from accumulated thinking content
 				if len(reasoningParts) > 0 {
-					reasoningTokens = int64(len(strings.Join(reasoningParts, "")) / 4) // Rough estimation
+					// Removed estimation - use actual Anthropic token counts
 				}
 			}
 		}
@@ -385,8 +385,8 @@ func ConvertClaudeResponseToOpenAINonStream(_ context.Context, _ string, origina
 	// Add reasoning content if available (following OpenAI reasoning format)
 	if len(reasoningParts) > 0 {
 		reasoningContent := strings.Join(reasoningParts, "")
-		// Add reasoning as a separate field in the message
-		out, _ = sjson.Set(out, "choices.0.message.reasoning", reasoningContent)
+		// Add reasoning_content to match streaming format and OpenAI-compatible SDKs
+		out, _ = sjson.Set(out, "choices.0.message.reasoning_content", reasoningContent)
 	}
 
 	// Set tool calls if any were accumulated during processing
