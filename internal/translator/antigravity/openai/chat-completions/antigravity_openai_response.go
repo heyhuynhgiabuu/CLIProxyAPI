@@ -88,24 +88,46 @@ func ConvertAntigravityResponseToOpenAI(_ context.Context, _ string, originalReq
 	// Extract and set usage metadata (token counts).
 	if usageResult := gjson.GetBytes(rawJSON, "response.usageMetadata"); usageResult.Exists() {
 		cachedTokenCount := usageResult.Get("cachedContentTokenCount").Int()
-		if candidatesTokenCountResult := usageResult.Get("candidatesTokenCount"); candidatesTokenCountResult.Exists() {
-			template, _ = sjson.Set(template, "usage.completion_tokens", candidatesTokenCountResult.Int())
-		}
-		if totalTokenCountResult := usageResult.Get("totalTokenCount"); totalTokenCountResult.Exists() {
-			template, _ = sjson.Set(template, "usage.total_tokens", totalTokenCountResult.Int())
-		}
 		promptTokenCount := usageResult.Get("promptTokenCount").Int() - cachedTokenCount
 		thoughtsTokenCount := usageResult.Get("thoughtsTokenCount").Int()
-		template, _ = sjson.Set(template, "usage.prompt_tokens", promptTokenCount+thoughtsTokenCount)
-		if thoughtsTokenCount > 0 {
-			template, _ = sjson.Set(template, "usage.completion_tokens_details.reasoning_tokens", thoughtsTokenCount)
-		}
-		// Include cached token count if present (indicates prompt caching is working)
-		if cachedTokenCount > 0 {
-			var err error
-			template, err = sjson.Set(template, "usage.prompt_tokens_details.cached_tokens", cachedTokenCount)
-			if err != nil {
-				log.Warnf("antigravity openai response: failed to set cached_tokens: %v", err)
+
+		// Detect if request came from Anthropic SDK format
+		// Anthropic SDK sends /v1/messages with specific request format
+		isAnthropicFormat := len(gjson.GetBytes(requestRawJSON, "messages").Raw) > 0 &&
+			len(gjson.GetBytes(requestRawJSON, "max_tokens").Raw) > 0
+
+		// Return Anthropic format usage if request is from Anthropic SDK
+		if isAnthropicFormat {
+			if totalTokenCountResult := usageResult.Get("totalTokenCount"); totalTokenCountResult.Exists() {
+				template, _ = sjson.Set(template, "usage.total_tokens", totalTokenCountResult.Int())
+			}
+			template, _ = sjson.Set(template, "usage.input_tokens", promptTokenCount+thoughtsTokenCount)
+			if candidatesTokenCountResult := usageResult.Get("candidatesTokenCount"); candidatesTokenCountResult.Exists() {
+				template, _ = sjson.Set(template, "usage.output_tokens", candidatesTokenCountResult.Int())
+			}
+			// Anthropic format doesn't have a separate field for cached tokens - include in input_tokens
+			if cachedTokenCount > 0 {
+				template, _ = sjson.Set(template, "usage.cache_read_tokens", cachedTokenCount)
+			}
+		} else {
+			// OpenAI format usage
+			if candidatesTokenCountResult := usageResult.Get("candidatesTokenCount"); candidatesTokenCountResult.Exists() {
+				template, _ = sjson.Set(template, "usage.completion_tokens", candidatesTokenCountResult.Int())
+			}
+			if totalTokenCountResult := usageResult.Get("totalTokenCount"); totalTokenCountResult.Exists() {
+				template, _ = sjson.Set(template, "usage.total_tokens", totalTokenCountResult.Int())
+			}
+			template, _ = sjson.Set(template, "usage.prompt_tokens", promptTokenCount+thoughtsTokenCount)
+			if thoughtsTokenCount > 0 {
+				template, _ = sjson.Set(template, "usage.completion_tokens_details.reasoning_tokens", thoughtsTokenCount)
+			}
+			// Include cached token count if present (indicates prompt caching is working)
+			if cachedTokenCount > 0 {
+				var err error
+				template, err = sjson.Set(template, "usage.prompt_tokens_details.cached_tokens", cachedTokenCount)
+				if err != nil {
+					log.Warnf("antigravity openai response: failed to set cached_tokens: %v", err)
+				}
 			}
 		}
 	}
